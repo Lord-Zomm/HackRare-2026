@@ -14,9 +14,6 @@ import {
   TextField,
   Typography,
   Autocomplete,
-  Accordion,
-  AccordionSummary,
-  AccordionDetails,
   Tooltip,
 } from "@mui/material";
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
@@ -25,6 +22,12 @@ import SaveIcon from "@mui/icons-material/Save";
 import RestoreIcon from "@mui/icons-material/Restore";
 import RestartAltIcon from "@mui/icons-material/RestartAlt";
 
+import {
+  CardActionArea,
+  Collapse,
+  IconButton,
+} from "@mui/material";
+
 import { HPO_LITE } from "../data/hpo-lite";
 import type { PatientCase } from "../types/case";
 import type { RecommendedAction } from "../types/reco";
@@ -32,6 +35,27 @@ import { recommendNextSteps } from "../engine/recommender";
 
 import { buildDifferential } from "../engine/differential";
 import type { DifferentialItem } from "../types/differential";
+
+type ExpandMoreProps = {
+  expanded: boolean;
+};
+
+function ExpandMore({ expanded }: ExpandMoreProps) {
+  return (
+    <IconButton
+      size="small"
+      disableRipple
+      sx={{
+        transform: expanded ? "rotate(180deg)" : "rotate(0deg)",
+        transition: "transform 150ms ease",
+        color: "#5f6368",
+      }}
+      aria-label="expand"
+    >
+      <ExpandMoreIcon />
+    </IconButton>
+  );
+}
 
 const STORAGE_KEY = "genomic_copilot_saved_case_v1";
 
@@ -89,6 +113,15 @@ export function CasePage() {
   const [priorYear, setPriorYear] = useState<string>("");
   const [priorResult, setPriorResult] = useState<PatientCase["priorTesting"]["result"]>("na");
   const [priorNotes, setPriorNotes] = useState("");
+
+  const [expandedActions, setExpandedActions] = useState<Record<string, boolean>>({});
+    const [expandedDiff, setExpandedDiff] = useState<Record<string, boolean>>({});
+
+    const toggleAction = (id: string) =>
+    setExpandedActions((s) => ({ ...s, [id]: !s[id] }));
+
+    const toggleDiff = (id: string) =>
+    setExpandedDiff((s) => ({ ...s, [id]: !s[id] }));
 
   const patientCase: PatientCase = useMemo(
     () => ({
@@ -204,7 +237,7 @@ export function CasePage() {
                 Recommended next actions
               </Typography>
               <Typography sx={{ color: "#5f6368" }}>
-                Decision support from incomplete records. Recommendations are transparent about what is missing and what would change.
+                Enter case information to review suggested next actions and missing details.
               </Typography>
             </Box>
 
@@ -228,27 +261,25 @@ export function CasePage() {
 
           <Divider sx={{ my: 2 }} />
 
-          <Stack direction={{ xs: "column", md: "row" }} spacing={2} alignItems="center">
-            <Box sx={{ flex: 1 }}>
-              <Typography sx={{ fontWeight: 700, color: "#202124", mb: 0.5 }}>
-                Case completeness
-              </Typography>
-              <LinearProgress variant="determinate" value={completeness} />
-              <Typography sx={{ color: "#5f6368", fontSize: 13, mt: 0.5 }}>
-                {completeness}% • Phenotypes: {patientCase.phenotypes.length} • Prior testing: {patientCase.priorTesting.type}
-              </Typography>
-            </Box>
+        <Stack spacing={0.75}>
+        <Stack direction="row" spacing={1} alignItems="center" sx={{ flexWrap: "wrap" }}>
+            <Typography sx={{ fontWeight: 700, color: "#202124", fontSize: 13 }}>
+            Completeness
+            </Typography>
 
-            <Box sx={{ flex: 1 }}>
-              {missing.length > 0 ? (
-                <Alert severity="info">
-                  Missing: <b>{missing.join(", ")}</b>. The tool will still recommend next actions, but confidence may be lower.
-                </Alert>
-              ) : (
-                <Alert severity="success">Core fields present. Recommendations should be more stable.</Alert>
-              )}
-            </Box>
-          </Stack>
+            <Typography sx={{ color: "#5f6368", fontSize: 13 }}>
+            {completeness}% • Phenotypes: {patientCase.phenotypes.length} • Prior testing: {patientCase.priorTesting.type}
+            </Typography>
+
+            {missing.length > 0 && (
+            <Typography sx={{ color: "#5f6368", fontSize: 13 }}>
+            •&nbsp;&nbsp;Missing: <b>{missing.join(", ")}</b>
+            </Typography>
+            )}
+        </Stack>
+
+        <LinearProgress variant="determinate" value={completeness} sx={{ height: 6, borderRadius: 999 }} />
+        </Stack>
         </CardContent>
       </Card>
 
@@ -373,7 +404,6 @@ export function CasePage() {
                   label="Notes (optional)"
                   value={priorNotes}
                   onChange={(e) => setPriorNotes(e.target.value)}
-                  helperText="Example: “panel negative; CNV not assessed; singleton exome 2019”"
                 />
 
                 <Divider />
@@ -396,77 +426,85 @@ export function CasePage() {
                 </Typography>
 
                 <Stack spacing={1.5}>
-                  {top3.map((r) => (
-                    <Card key={r.id} variant="outlined" sx={{ borderRadius: 2 }}>
-                      <CardContent>
-                        <Stack direction={{ xs: "column", sm: "row" }} spacing={1} justifyContent="space-between">
-                          <Box>
-                            <Typography sx={{ fontWeight: 900, color: "#202124" }}>{r.title}</Typography>
-                            <Stack direction="row" spacing={1} sx={{ mt: 0.5, flexWrap: "wrap" }}>
-                              <Chip size="small" label={r.category.replaceAll("_", " ")} />
-                              {confidenceChip(r.confidence)}
-                            </Stack>
-                          </Box>
+                  {top3.map((r) => {
+                    const isOpen = !!expandedActions[r.id];
 
-                          <Box sx={{ minWidth: 140 }}>
-                            <Typography sx={{ fontWeight: 900, color: "#202124" }}>{r.score}</Typography>
-                            <LinearProgress variant="determinate" value={r.score} />
-                            <Typography sx={{ color: "#5f6368", fontSize: 12, mt: 0.5 }}>
-                              Priority
-                            </Typography>
-                          </Box>
-                        </Stack>
-
-                        <Accordion sx={{ mt: 1 }} elevation={0}>
-                          <AccordionSummary
-                            expandIcon={<ExpandMoreIcon />}
-                            sx={{ px: 0, "& .MuiAccordionSummary-content": { my: 0.5 } }}
+                    return (
+                        <Card key={r.id} variant="outlined" sx={{ borderRadius: 2, overflow: "hidden" }}>
+                        <CardActionArea onClick={() => toggleAction(r.id)} sx={{ p: 2 }}>
+                            <Stack
+                            direction={{ xs: "column", sm: "row" }}
+                            spacing={1.5}
+                            justifyContent="space-between"
+                            alignItems={{ xs: "flex-start", sm: "center" }}
                             >
-                            <Typography sx={{ color: "#5f6368", fontSize: 13 }}>
-                                Why / What would change / Safety
-                            </Typography>
-                            </AccordionSummary>
-                          <AccordionDetails>
+                            <Box sx={{ pr: 1, flex: 1 }}>
+                                <Typography sx={{ fontWeight: 900, color: "#202124" }}>{r.title}</Typography>
+
+                                <Stack direction="row" spacing={1} sx={{ mt: 0.75, flexWrap: "wrap", alignItems: "center" }}>
+                                <Chip size="small" label={r.category.replaceAll("_", " ")} />
+                                {confidenceChip(r.confidence)}
+                                <Typography sx={{ color: "#5f6368", fontSize: 13 }}>
+                                    {isOpen ? "Hide" : "More"}
+                                </Typography>
+                                </Stack>
+                            </Box>
+
+                            <Stack direction="row" spacing={1} alignItems="center">
+                                <Box sx={{ minWidth: 140 }}>
+                                <Typography sx={{ fontWeight: 900, color: "#202124" }}>{r.score}</Typography>
+                                <LinearProgress variant="determinate" value={r.score} />
+                                <Typography sx={{ color: "#5f6368", fontSize: 12, mt: 0.5 }}>Priority</Typography>
+                                </Box>
+
+                                <ExpandMore expanded={isOpen} />
+                            </Stack>
+                            </Stack>
+                        </CardActionArea>
+
+                        <Collapse in={isOpen} timeout="auto" unmountOnExit>
+                            <Divider />
+                            <Box sx={{ p: 2, bgcolor: "#fcfcfc" }}>
                             <Typography sx={{ fontWeight: 800, color: "#202124", mb: 0.5 }}>Why</Typography>
                             <ul style={{ marginTop: 6, color: "#3c4043" }}>
-                              {r.reasons.map((x, i) => (
+                                {r.reasons.map((x, i) => (
                                 <li key={i}>{x}</li>
-                              ))}
+                                ))}
                             </ul>
 
                             <Typography sx={{ fontWeight: 800, color: "#202124", mb: 0.5 }}>What would change</Typography>
                             <ul style={{ marginTop: 6, color: "#3c4043" }}>
-                              {r.whatWouldChange.map((x, i) => (
+                                {r.whatWouldChange.map((x, i) => (
                                 <li key={i}>{x}</li>
-                              ))}
+                                ))}
                             </ul>
 
                             {r.suggestedQuestions?.length ? (
-                              <>
+                                <>
                                 <Typography sx={{ fontWeight: 800, color: "#202124", mb: 0.5 }}>Suggested questions</Typography>
                                 <ul style={{ marginTop: 6, color: "#3c4043" }}>
-                                  {r.suggestedQuestions.map((x, i) => (
+                                    {r.suggestedQuestions.map((x, i) => (
                                     <li key={i}>{x}</li>
-                                  ))}
+                                    ))}
                                 </ul>
-                              </>
+                                </>
                             ) : null}
 
                             {r.safetyNotes?.length ? (
-                              <>
+                                <>
                                 <Typography sx={{ fontWeight: 800, color: "#202124", mb: 0.5 }}>Safety notes</Typography>
                                 <ul style={{ marginTop: 6, color: "#3c4043" }}>
-                                  {r.safetyNotes.map((x, i) => (
+                                    {r.safetyNotes.map((x, i) => (
                                     <li key={i}>{x}</li>
-                                  ))}
+                                    ))}
                                 </ul>
-                              </>
+                                </>
                             ) : null}
-                          </AccordionDetails>
-                        </Accordion>
-                      </CardContent>
-                    </Card>
-                  ))}
+                            </Box>
+                        </Collapse>
+                        </Card>
+                    );
+                    })}
                 </Stack>
               </CardContent>
             </Card>
@@ -481,51 +519,61 @@ export function CasePage() {
     </Typography>
 
     <Stack spacing={1}>
-      {diff.slice(0, 4).map((d) => (
-        <Box key={d.id} sx={{ p: 1.5, border: "1px solid #eee", borderRadius: 2, bgcolor: "white" }}>
-          <Stack direction={{ xs: "column", sm: "row" }} spacing={1} justifyContent="space-between">
-            <Box>
-              <Typography sx={{ fontWeight: 800, color: "#202124" }}>{d.title}</Typography>
-              <Typography sx={{ color: "#5f6368", fontSize: 12 }}>
-                Supporting: {d.supporting.length ? d.supporting.join(", ") : "—"}
-              </Typography>
-            </Box>
-            <Box sx={{ minWidth: 120 }}>
-              <Typography sx={{ fontWeight: 900, color: "#202124" }}>{d.score}</Typography>
-              <LinearProgress variant="determinate" value={d.score} />
-            </Box>
-          </Stack>
+      {diff.slice(0, 4).map((d) => {
+        const isOpen = !!expandedDiff[d.id];
 
-          <Accordion sx={{ mt: 1 }} elevation={0}>
-            <AccordionSummary
-                expandIcon={<ExpandMoreIcon />}
-                sx={{
-                    px: 0,
-                    minHeight: 0,
-                    "& .MuiAccordionSummary-content": { my: 0.5 },
-                    "& .MuiAccordionSummary-expandIconWrapper": { color: "#5f6368" },
-                }}
+        return (
+            <Box key={d.id} sx={{ border: "1px solid #eee", borderRadius: 2, bgcolor: "white", overflow: "hidden" }}>
+            <CardActionArea onClick={() => toggleDiff(d.id)} sx={{ p: 1.5 }}>
+                <Stack
+                direction={{ xs: "column", sm: "row" }}
+                spacing={1.5}
+                justifyContent="space-between"
+                alignItems={{ xs: "flex-start", sm: "center" }}
                 >
-                <Typography sx={{ color: "#5f6368", fontSize: 13 }}>
-                    Why / What would change this
-                </Typography>
-                </AccordionSummary>
-            <AccordionDetails>
-              <Typography sx={{ fontWeight: 800, color: "#202124", mb: 0.5 }}>Why</Typography>
-              <ul style={{ marginTop: 6, color: "#3c4043" }}>
-                {d.notes.map((x, i) => <li key={i}>{x}</li>)}
-              </ul>
+                <Box sx={{ pr: 1, flex: 1 }}>
+                    <Typography sx={{ fontWeight: 800, color: "#202124" }}>{d.title}</Typography>
+                    <Typography sx={{ color: "#5f6368", fontSize: 12, mt: 0.5 }}>
+                    Supporting: {d.supporting.length ? d.supporting.join(", ") : "—"}
+                    </Typography>
 
-              <Typography sx={{ fontWeight: 800, color: "#202124", mb: 0.5 }}>
-                What would change this
-              </Typography>
-              <ul style={{ marginTop: 6, color: "#3c4043" }}>
-                {d.missingDiscriminators.map((x, i) => <li key={i}>{x}</li>)}
-              </ul>
-            </AccordionDetails>
-          </Accordion>
-        </Box>
-      ))}
+                    <Typography sx={{ color: "#5f6368", fontSize: 13, mt: 0.75 }}>
+                    {isOpen ? "Hide" : "More"}
+                    </Typography>
+                </Box>
+
+                <Stack direction="row" spacing={1} alignItems="center">
+                    <Box sx={{ minWidth: 120 }}>
+                    <Typography sx={{ fontWeight: 900, color: "#202124" }}>{d.score}</Typography>
+                    <LinearProgress variant="determinate" value={d.score} />
+                    </Box>
+
+                    <ExpandMore expanded={isOpen} />
+                </Stack>
+                </Stack>
+            </CardActionArea>
+
+            <Collapse in={isOpen} timeout="auto" unmountOnExit>
+                <Divider />
+                <Box sx={{ p: 1.5, bgcolor: "#fcfcfc" }}>
+                <Typography sx={{ fontWeight: 800, color: "#202124", mb: 0.5 }}>Why</Typography>
+                <ul style={{ marginTop: 6, color: "#3c4043" }}>
+                    {d.notes.map((x, i) => (
+                    <li key={i}>{x}</li>
+                    ))}
+                </ul>
+
+                <Typography sx={{ fontWeight: 800, color: "#202124", mb: 0.5 }}>What would change this</Typography>
+                <ul style={{ marginTop: 6, color: "#3c4043" }}>
+                    {d.missingDiscriminators.map((x, i) => (
+                    <li key={i}>{x}</li>
+                    ))}
+                </ul>
+                </Box>
+            </Collapse>
+            </Box>
+        );
+        })}
     </Stack>
   </CardContent>
 </Card>
